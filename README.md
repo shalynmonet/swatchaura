@@ -146,6 +146,15 @@ from swatchaura.segmentation import get_video_masks
 from swatchaura.video_io import read_video, write_video
 
 video_path = Path("sample_segmentation.mp4")
+# Recreate the known test clip so an older file with different box coordinates
+# cannot make this example composite the wrong part of the frame.
+frames = []
+for index in range(12):
+    frame = np.full((120, 160, 3), (45, 45, 45), dtype=np.uint8)
+    x = 62 + index * 2
+    cv2.rectangle(frame, (x, 42), (x + 34, 78), (230, 80, 30), thickness=-1)
+    frames.append(frame)
+write_video(frames, video_path, 12)
 frames, fps = read_video(video_path)
 masks = get_video_masks(
     frames,

@@ -113,6 +113,15 @@ def _grabcut_first_frame(frame: np.ndarray, box: Box) -> np.ndarray:
 
     mask = np.full((image_height, image_width), cv2.GC_BGD, dtype=np.uint8)
     mask[y0:y1, x0:x1] = cv2.GC_PR_FGD
+    # Seed the center of the rough box as definite foreground. With a uniform
+    # synthetic object (or a low-texture garment), rectangle initialization
+    # alone can classify nearly the whole object as probable background.
+    core_x0 = x0 + max(1, int(round((x1 - x0) * 0.2)))
+    core_y0 = y0 + max(1, int(round((y1 - y0) * 0.2)))
+    core_x1 = x1 - max(1, int(round((x1 - x0) * 0.2)))
+    core_y1 = y1 - max(1, int(round((y1 - y0) * 0.2)))
+    if core_x1 > core_x0 and core_y1 > core_y0:
+        mask[core_y0:core_y1, core_x0:core_x1] = cv2.GC_FGD
     background_model = np.zeros((1, 65), dtype=np.float64)
     foreground_model = np.zeros((1, 65), dtype=np.float64)
 
@@ -130,7 +139,7 @@ def _grabcut_first_frame(frame: np.ndarray, box: Box) -> np.ndarray:
         background_model,
         foreground_model,
         5,
-        cv2.GC_INIT_WITH_RECT,
+        cv2.GC_INIT_WITH_MASK,
     )
     binary = np.where(
         (mask == cv2.GC_FGD) | (mask == cv2.GC_PR_FGD), 255, 0
