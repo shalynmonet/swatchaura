@@ -6,7 +6,7 @@ The first demo targets are an airplane wing filmed from a window seat and a pers
 
 ## Project status
 
-This repository is being built milestone by milestone for the Meta Global AI Developer Hackathon (deadline: November 4, 2026). Milestones 1 and 2 (project scaffold and video read/write) are complete. Milestone 3 wraps Monogrammar's houndstooth geometry and adds uploaded swatch tiling. Milestone 4 adds GrabCut/optical-flow mock segmentation, mask caching, and the documented live SAM 3.1 path. Milestone 5 composites patterns into the masks while keeping source lighting and soft edges. Milestone 6 adds optical-flow tracking and homography-based surface warping, with automatic version 1 fallback when tracking is unreliable. Milestone 7 parses style descriptions into validated pattern settings using local rules or Muse Spark.
+This repository is being built milestone by milestone for the Meta Global AI Developer Hackathon (deadline: November 4, 2026). Milestones 1 and 2 (project scaffold and video read/write) are complete. Milestone 3 wraps Monogrammar's houndstooth geometry and adds uploaded swatch tiling. Milestone 4 adds GrabCut/optical-flow mock segmentation, mask caching, and the documented live SAM 3.1 path. Milestone 5 composites patterns into the masks while keeping source lighting and soft edges. Milestone 6 adds optical-flow tracking and homography-based surface warping, with automatic version 1 fallback when tracking is unreliable. Milestone 7 parses style descriptions into validated pattern settings using local rules or Muse Spark. Milestone 8 generates swatches locally or with Muse Image and passes them to the same video compositor.
 
 ## Requirements
 
@@ -234,6 +234,44 @@ print(settings.to_dict())
 
 To try Muse Spark, set `MOCK_MODE=false` in `.env`, make sure `META_API_KEY` is set, then run the same block. That makes a live API request. The request uses Meta's official [Muse Spark structured-output guide](https://dev.meta.ai/docs/structured-output), including JSON Schema output via Chat Completions. API request details remain isolated in `src/swatchaura/meta_client.py`.
 
+## Swatch generation (Milestone 8)
+
+`swatchaura.swatch.generate_swatch(prompt)` returns an OpenCV BGR image tile that can go directly into `composite_video(...)`. With `MOCK_MODE=true`, a local procedural renderer makes houndstooth, stripes, polka dots, plaid, floral, or abstract tiles. With `MOCK_MODE=false`, the prompt goes to Muse Image `muse-image-1.0` through `meta_client.py`; the adapter decodes its base64 image response to bytes and the swatch module turns those bytes into an image array.
+
+This local example makes a patterned preview without Meta API usage. It creates a textured moving patch and matching masks so the surface tracking option has features to follow:
+
+```powershell
+@'
+import numpy as np
+from swatchaura.compositing import composite_video
+from swatchaura.swatch import generate_swatch
+from swatchaura.video_io import write_video
+
+prompt = "gold and black houndstooth, bigger teeth"
+swatch = generate_swatch(prompt, mock_mode=True)
+rng = np.random.default_rng(9)
+patch = rng.integers(35, 220, size=(48, 56, 3), dtype=np.uint8)
+frames, masks = [], []
+for index in range(16):
+    frame = np.full((140, 180, 3), 35, dtype=np.uint8)
+    x, y = 55 + index * 2, 42 + index
+    frame[y:y + 48, x:x + 56] = patch
+    mask = np.zeros(frame.shape[:2], dtype=np.uint8)
+    mask[y:y + 48, x:x + 56] = 255
+    frames.append(frame)
+    masks.append(mask)
+
+result = composite_video(
+    frames, masks, swatch, track_surface=True, feather_radius_px=1.5
+)
+write_video(result, "sample_muse_swatch.mp4", 12)
+print("Wrote sample_muse_swatch.mp4 using the generated swatch.")
+'@ | python -
+Start-Process .\sample_muse_swatch.mp4
+```
+
+For live generation, set `MOCK_MODE=false` in `.env`, ensure `META_API_KEY` is set, and call `generate_swatch(prompt)` without a `mock_mode` override. That sends one generation request to Meta. The request follows Meta's [Muse Image generation guide](https://dev.meta.ai/docs/image-generation) and [Generate an image API reference](https://dev.meta.ai/docs/api-reference/images/create-image). Model API request formats and credentials stay inside `meta_client.py`.
+
 ## Uploaded swatch tiling (Milestone 3)
 
 `swatchaura.patterns.tile_swatch(source, output_size, scale=..., rotation=...)` repeats an image to fill `(width, height)`. It accepts an OpenCV image array, an image path, or encoded upload bytes (for example, a Streamlit upload's `getvalue()`). `scale` sets the size of each repeat and `rotation` turns each repeat. A non-tileable source can have visible joins; uploaded tileable swatches repeat cleanly.
@@ -272,7 +310,7 @@ Start-Process .\houndstooth_preview.png
 5. Reliable version 1 compositing with luminance, shadows, and feathered edges
 6. Optical-flow tracking and homography-based pattern placement, with automatic fallback (implemented)
 7. Validated Muse Spark style settings (implemented)
-8. Muse Image swatch generation
+8. Muse Image swatch generation (implemented)
 9. Streamlit upload, preview, before/after, and download interface
 10. Progress, error handling, sample clips, and final model documentation
 

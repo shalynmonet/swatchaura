@@ -8,6 +8,7 @@ module so the rest of SwatchAura stays independent of API details.
 from __future__ import annotations
 
 import asyncio
+import base64
 import mimetypes
 import os
 import tempfile
@@ -32,6 +33,7 @@ from .video_io import write_video
 BASE_URL = "https://api.meta.ai/v1"
 SAM_MODEL = "sam-3.1"
 MUSE_SPARK_MODEL = "muse-spark-1.3"
+MUSE_IMAGE_MODEL = "muse-image-1.0"
 
 
 def _client() -> AsyncOpenAI:
@@ -122,6 +124,32 @@ def request_pattern_settings(style_text: str) -> str:
     if not content:
         raise ValueError("Muse Spark returned an empty style response.")
     return content
+
+
+def request_pattern_swatch(prompt: str) -> bytes:
+    """Generate one image with Muse Image and return its encoded image bytes."""
+    description = prompt.strip()
+    if not description:
+        raise ValueError("Describe the swatch you want Muse Image to generate.")
+
+    # Meta documents this as the OpenAI-compatible Images API generation call.
+    # The default response_format is b64_json; no temporary URL is requested.
+    response = _sync_client().images.generate(
+        model=MUSE_IMAGE_MODEL,
+        prompt=(
+            "Create a seamless, tileable textile pattern swatch. Show only the "
+            "repeating pattern, edge-to-edge, with no objects, fabric folds, "
+            "mockup, text, border, or blank margins. User's design: "
+            f"{description}"
+        ),
+        n=1,
+    )
+    if not response.data or not response.data[0].b64_json:
+        raise ValueError("Muse Image returned no base64 image data.")
+    try:
+        return base64.b64decode(response.data[0].b64_json, validate=True)
+    except (ValueError, TypeError) as exc:
+        raise ValueError("Muse Image returned invalid base64 image data.") from exc
 
 
 def _media_type(path: Path) -> str:

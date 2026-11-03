@@ -18,6 +18,7 @@ sample_output.mp4
 sample_segmentation.mp4
 sample_composited.mp4
 sample_tracked.mp4
+sample_muse_swatch.mp4
 .streamlit/secrets.toml
 
 # Editor and OS files
