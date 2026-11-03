@@ -6,7 +6,7 @@ The first demo targets are an airplane wing filmed from a window seat and a pers
 
 ## Project status
 
-This repository is being built milestone by milestone for the Meta Global AI Developer Hackathon (deadline: November 4, 2026). Milestone 1 (project scaffold and local setup) is complete. Milestone 2 adds video read/write helpers; pattern generation and the app UI will follow later.
+This repository is being built milestone by milestone for the Meta Global AI Developer Hackathon (deadline: November 4, 2026). Milestones 1 and 2 (project scaffold and video read/write) are complete. Milestone 3 can repeat uploaded swatch images and is waiting for the existing Monogrammar pattern source so SwatchAura can wrap its matching logic. Milestone 4 adds mock segmentation and mask caching; live SAM 3.1 wiring is waiting for the official API docs.
 
 ## Requirements
 
@@ -72,6 +72,46 @@ write_video(read_frames, "sample_output.mp4", fps)
 print(f"Read {len(read_frames)} frames at {fps:g} fps; wrote sample_output.mp4")
 '@ | python -
 ```
+
+## Segmentation (Milestone 4)
+
+`swatchaura.segmentation.get_video_masks(...)` returns one binary mask per video frame. With `MOCK_MODE=true` (the default), give it a rough first-frame box as `(x, y, width, height)`. OpenCV GrabCut creates the first mask, then sparse optical flow follows that mask through subsequent frames. The helper caches the masks in `cache/masks/`; the cache key includes the clip contents, object prompt, mode, and box. A changed clip or box automatically gets a separate cache entry.
+
+To exercise the mock without a sample clip, run this PowerShell here-string from the project folder with the virtual environment active. It creates a small moving-shape clip, segments it, and prints mask and cache information:
+
+```powershell
+@'
+import cv2
+import numpy as np
+from swatchaura.segmentation import get_video_masks
+from swatchaura.video_io import read_video, write_video
+
+frames = []
+for index in range(12):
+    frame = np.full((120, 160, 3), (45, 45, 45), dtype=np.uint8)
+    x = 62 + index * 2
+    cv2.rectangle(frame, (x, 42), (x + 34, 78), (30, 80, 230), thickness=-1)
+    frames.append(frame)
+
+write_video(frames, "sample_segmentation.mp4", 12)
+clip_frames, _ = read_video("sample_segmentation.mp4")
+masks = get_video_masks(
+    clip_frames,
+    "the moving blue rectangle",
+    mock_mode=True,
+    first_frame_box=(57, 37, 52, 48),
+)
+print(f"Got {len(masks)} masks with shape {masks[0].shape}.")
+print(f"Foreground pixels in frame 1: {np.count_nonzero(masks[0])}")
+print(f"Cached mask files: {len(list(__import__('pathlib').Path('cache/masks').glob('*.npz')))}")
+'@ | python -
+```
+
+When the official Meta Model API docs are available, the SAM 3.1 call will be implemented only in `swatchaura.meta_client`. Until then, setting `MOCK_MODE=false` produces a clear `NotImplementedError` instead of guessing a URL or request format. The first-frame box can be supplied from a UI drawing control when the Streamlit milestone is reached.
+
+## Uploaded swatch tiling (Milestone 3)
+
+`swatchaura.patterns.tile_swatch(source, output_size, scale=..., rotation=...)` repeats an image to fill `(width, height)`. It accepts an OpenCV image array, an image path, or encoded upload bytes (for example, a Streamlit upload's `getvalue()`). `scale` sets the size of each repeat and `rotation` turns each repeat. A non-tileable source can have visible joins; uploaded tileable swatches repeat cleanly.
 
 ## Planned build
 
