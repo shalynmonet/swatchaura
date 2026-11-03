@@ -139,6 +139,8 @@ After running the mock segmentation example above once, use this PowerShell bloc
 
 ```powershell
 @'
+import cv2
+import numpy as np
 from pathlib import Path
 from swatchaura.compositing import composite_video
 from swatchaura.patterns import generate_houndstooth_tile
