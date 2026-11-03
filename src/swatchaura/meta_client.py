@@ -24,13 +24,14 @@ from meta_sam_parser import (
     parse_responses_stream,
     video_segmentation_format,
 )
-from openai import AsyncOpenAI
+from openai import AsyncOpenAI, OpenAI
 
 from .video_io import write_video
 
 
 BASE_URL = "https://api.meta.ai/v1"
 SAM_MODEL = "sam-3.1"
+MUSE_SPARK_MODEL = "muse-spark-1.3"
 
 
 def _client() -> AsyncOpenAI:
@@ -38,8 +39,89 @@ def _client() -> AsyncOpenAI:
     load_dotenv()
     api_key = os.getenv("META_API_KEY")
     if not api_key:
-        raise RuntimeError("Set META_API_KEY in .env before using SAM 3.1.")
+        raise RuntimeError("Set META_API_KEY in .env before using Meta Model API.")
     return AsyncOpenAI(base_url=BASE_URL, api_key=api_key)
+
+
+def _sync_client() -> OpenAI:
+    """Create a synchronous client for one-shot text model requests."""
+    load_dotenv()
+    api_key = os.getenv("META_API_KEY")
+    if not api_key:
+        raise RuntimeError("Set META_API_KEY in .env before using Meta Model API.")
+    return OpenAI(base_url=BASE_URL, api_key=api_key)
+
+
+def request_pattern_settings(style_text: str) -> str:
+    """Ask Muse Spark for JSON style settings and return its raw JSON text.
+
+    This is the single Meta API adapter entry point for Muse Spark. The
+    endpoint, model, and structured-output request follow Meta's official
+    Structured Output guide. The caller validates values before using them.
+    """
+    prompt = style_text.strip()
+    if not prompt:
+        raise ValueError("Describe the pattern style you want Muse Spark to parse.")
+
+    schema = {
+        "type": "json_schema",
+        "json_schema": {
+            "name": "swatchaura_pattern_settings",
+            "strict": True,
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "color1": {"type": "string"},
+                    "color2": {"type": "string"},
+                    "scale": {"type": "number"},
+                    "rotation": {"type": "number"},
+                    "pattern_type": {
+                        "type": "string",
+                        "enum": [
+                            "houndstooth",
+                            "stripes",
+                            "polka_dots",
+                            "plaid",
+                            "floral",
+                            "abstract",
+                        ],
+                    },
+                },
+                "required": [
+                    "color1",
+                    "color2",
+                    "scale",
+                    "rotation",
+                    "pattern_type",
+                ],
+                "additionalProperties": False,
+            },
+        },
+    }
+
+    # TODO: Verify Muse Spark model availability and structured-output access
+    # for the user's Meta project/key when live credits are enabled.
+    response = _sync_client().chat.completions.create(
+        model=MUSE_SPARK_MODEL,
+        messages=[
+            {
+                "role": "system",
+                "content": (
+                    "Convert the user's fabric pattern description into the "
+                    "requested settings. Use CSS #RRGGBB colors. Scale is a "
+                    "positive repeat-size multiplier near 1.0; larger means "
+                    "larger motifs. Rotation is degrees from -180 to 180. "
+                    "Choose the closest listed pattern_type."
+                ),
+            },
+            {"role": "user", "content": prompt},
+        ],
+        response_format=schema,
+    )
+    content = response.choices[0].message.content
+    if not content:
+        raise ValueError("Muse Spark returned an empty style response.")
+    return content
 
 
 def _media_type(path: Path) -> str:

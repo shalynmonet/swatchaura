@@ -6,7 +6,7 @@ The first demo targets are an airplane wing filmed from a window seat and a pers
 
 ## Project status
 
-This repository is being built milestone by milestone for the Meta Global AI Developer Hackathon (deadline: November 4, 2026). Milestones 1 and 2 (project scaffold and video read/write) are complete. Milestone 3 wraps Monogrammar's houndstooth geometry and adds uploaded swatch tiling. Milestone 4 adds GrabCut/optical-flow mock segmentation, mask caching, and the documented live SAM 3.1 path. Milestone 5 composites patterns into the masks while keeping source lighting and soft edges. Milestone 6 adds optical-flow tracking and homography-based surface warping, with automatic version 1 fallback when tracking is unreliable.
+This repository is being built milestone by milestone for the Meta Global AI Developer Hackathon (deadline: November 4, 2026). Milestones 1 and 2 (project scaffold and video read/write) are complete. Milestone 3 wraps Monogrammar's houndstooth geometry and adds uploaded swatch tiling. Milestone 4 adds GrabCut/optical-flow mock segmentation, mask caching, and the documented live SAM 3.1 path. Milestone 5 composites patterns into the masks while keeping source lighting and soft edges. Milestone 6 adds optical-flow tracking and homography-based surface warping, with automatic version 1 fallback when tracking is unreliable. Milestone 7 parses style descriptions into validated pattern settings using local rules or Muse Spark.
 
 ## Requirements
 
@@ -40,6 +40,8 @@ The `.env` file is ignored by Git. Keep your real API key there; never put it in
 MOCK_MODE=true
 META_API_KEY=
 ```
+
+`MOCK_MODE=true` uses local implementations for segmentation and style parsing, and requires no Meta API key. Set it to `false` to use live Meta Model API calls.
 
 ## Verify the setup
 
@@ -215,6 +217,23 @@ print("Wrote sample_tracked.mp4; the print should move with the textured patch."
 Start-Process .\sample_tracked.mp4
 ```
 
+## Style parsing (Milestone 7)
+
+`swatchaura.style.get_pattern_settings(...)` converts a description to validated `color1`, `color2` (hex), `scale`, `rotation`, and `pattern_type` values. In mock mode it uses a small local ruleset for color names/hex codes, size words, rotation degrees, and common pattern types. In live mode it asks Muse Spark `muse-spark-1.3` for schema-constrained JSON through the single `meta_client.py` adapter. Malformed JSON or out-of-range values log a warning and return the default settings; API/network errors remain visible to the app. Pattern type is parsed as metadata; the current built-in renderer still draws houndstooth, while other pattern types can be paired with swatches in a later step.
+
+With the virtual environment active and `MOCK_MODE=true`, this local example costs no API usage:
+
+```powershell
+@'
+from swatchaura.style import get_pattern_settings
+
+settings = get_pattern_settings("gold and black houndstooth, bigger teeth")
+print(settings.to_dict())
+'@ | python -
+```
+
+To try Muse Spark, set `MOCK_MODE=false` in `.env`, make sure `META_API_KEY` is set, then run the same block. That makes a live API request. The request uses Meta's official [Muse Spark structured-output guide](https://dev.meta.ai/docs/structured-output), including JSON Schema output via Chat Completions. API request details remain isolated in `src/swatchaura/meta_client.py`.
+
 ## Uploaded swatch tiling (Milestone 3)
 
 `swatchaura.patterns.tile_swatch(source, output_size, scale=..., rotation=...)` repeats an image to fill `(width, height)`. It accepts an OpenCV image array, an image path, or encoded upload bytes (for example, a Streamlit upload's `getvalue()`). `scale` sets the size of each repeat and `rotation` turns each repeat. A non-tileable source can have visible joins; uploaded tileable swatches repeat cleanly.
@@ -252,7 +271,7 @@ Start-Process .\houndstooth_preview.png
 4. Per-frame segmentation, starting with a local mock, plus disk caching
 5. Reliable version 1 compositing with luminance, shadows, and feathered edges
 6. Optical-flow tracking and homography-based pattern placement, with automatic fallback (implemented)
-7. Validated Muse Spark style settings
+7. Validated Muse Spark style settings (implemented)
 8. Muse Image swatch generation
 9. Streamlit upload, preview, before/after, and download interface
 10. Progress, error handling, sample clips, and final model documentation
