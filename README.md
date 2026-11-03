@@ -6,7 +6,7 @@ The first demo targets are an airplane wing filmed from a window seat and a pers
 
 ## Project status
 
-This repository is being built milestone by milestone for the Meta Global AI Developer Hackathon (deadline: November 4, 2026). Milestones 1 and 2 (project scaffold and video read/write) are complete. Milestone 3 wraps Monogrammar's houndstooth geometry and adds uploaded swatch tiling. Milestone 4 adds GrabCut/optical-flow mock segmentation, mask caching, and the documented live SAM 3.1 path.
+This repository is being built milestone by milestone for the Meta Global AI Developer Hackathon (deadline: November 4, 2026). Milestones 1 and 2 (project scaffold and video read/write) are complete. Milestone 3 wraps Monogrammar's houndstooth geometry and adds uploaded swatch tiling. Milestone 4 adds GrabCut/optical-flow mock segmentation, mask caching, and the documented live SAM 3.1 path. Milestone 5 composites patterns into the masks while keeping source lighting and soft edges.
 
 ## Requirements
 
@@ -130,6 +130,39 @@ print(f"SAM returned {len(masks)} frame masks; frame 1 has {int((masks[0] > 0).s
 ```
 
 For offline development, keep `MOCK_MODE=true` (or pass `mock_mode=True`) and provide `first_frame_box` as shown in the mock example above.
+
+## Version 1 compositing (Milestone 5)
+
+`swatchaura.compositing.composite_frame(...)` and `composite_video(...)` tile a generated pattern or uploaded swatch into each object mask. The pattern lightness is shaded by the source frame's LAB luminance so folds, shadows, and highlights show through. A Gaussian feather softens mask edges. This is the reliable, image-space version; surface tracking and homography are Milestone 6.
+
+After running the mock segmentation example above once, use this PowerShell block to make a patterned video preview. It uses only local mock segmentation:
+
+```powershell
+@'
+from pathlib import Path
+from swatchaura.compositing import composite_video
+from swatchaura.patterns import generate_houndstooth_tile
+from swatchaura.segmentation import get_video_masks
+from swatchaura.video_io import read_video, write_video
+
+video_path = Path("sample_segmentation.mp4")
+frames, fps = read_video(video_path)
+masks = get_video_masks(
+    frames,
+    "blue rectangle",
+    mock_mode=True,
+    first_frame_box=(57, 37, 52, 48),
+    video_path=video_path,
+    video_fps=fps,
+)
+pattern = generate_houndstooth_tile("#F3E3C9", "#8B3A2B")
+result = composite_video(frames, masks, pattern, pattern_scale=1.0, feather_radius_px=2.0)
+write_video(result, "sample_composited.mp4", fps)
+print(f"Wrote {len(result)} patterned frames at {fps:g} fps to sample_composited.mp4")
+'@ | python -
+```
+
+Open `sample_composited.mp4` to inspect the before/after effect. The generated sample output is ignored by Git.
 
 ## Uploaded swatch tiling (Milestone 3)
 

@@ -16,6 +16,7 @@ cache/
 sample_input.mp4
 sample_output.mp4
 sample_segmentation.mp4
+sample_composited.mp4
 .streamlit/secrets.toml
 
 # Editor and OS files
