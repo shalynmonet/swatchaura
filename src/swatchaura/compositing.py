@@ -114,10 +114,10 @@ def composite_video(
 ) -> list[np.ndarray]:
     """Composite a pattern into each mask, optionally tracking the surface.
 
-    With ``track_surface=True``, feature points inside the first mask are
-    tracked through the clip. A homography maps the first-frame pattern into
-    each later frame. If a frame has too few reliable tracks, it uses the
-    ordinary image-space composite for that frame instead.
+    With ``track_surface=True``, sparse feature tracking estimates a robust
+    first-frame homography, while dense optical flow locally deforms the
+    pattern between adjacent frames. The homography supplies a stable global
+    fallback when dense flow is unreliable; version 1 is the final fallback.
     """
     if len(frames) != len(masks):
         raise ValueError(
@@ -148,26 +148,169 @@ def composite_video(
 
     homographies = _track_pattern_homographies(frames, masks[0])
     output: list[np.ndarray] = []
-    for frame, mask, homography in zip(frames, masks, homographies):
-        if homography is None:
+    pattern_field = tiled
+    previous_gray = cv2.cvtColor(frames[0], cv2.COLOR_BGR2GRAY)
+    previous_homography: np.ndarray | None = homographies[0]
+    for index, (frame, mask, homography) in enumerate(
+        zip(frames, masks, homographies)
+    ):
+        if index == 0:
             output.append(
-                _composite_with_tiled_pattern(frame, mask, tiled, feather_radius_px)
+                _composite_with_tiled_pattern(frame, mask, pattern_field, feather_radius_px)
             )
             continue
 
-        warped_pattern = cv2.warpPerspective(
-            tiled,
+        homography_pattern = tiled
+        if homography is not None:
+            homography_pattern = cv2.warpPerspective(
+                tiled,
+                homography,
+                (frame_width, frame_height),
+                flags=cv2.INTER_LINEAR,
+                borderMode=cv2.BORDER_WRAP,
+            )
+
+        current_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        dense_result = _dense_flow_pattern_warp(
+            pattern_field,
+            previous_gray,
+            current_gray,
+            mask,
+            frames[0].shape[:2],
+            previous_homography,
             homography,
-            (frame_width, frame_height),
-            flags=cv2.INTER_LINEAR,
-            borderMode=cv2.BORDER_WRAP,
         )
+        if dense_result is None:
+            # A good global fit keeps the print attached when local flow cannot
+            # follow texture; without either signal, retain the V1 placement.
+            pattern_field = homography_pattern
+        else:
+            pattern_field = homography_pattern.copy()
+            flow_pattern, reliable_pixels = dense_result
+            pattern_field[reliable_pixels] = flow_pattern[reliable_pixels]
+
         output.append(
             _composite_with_tiled_pattern(
-                frame, mask, warped_pattern, feather_radius_px
+                frame, mask, pattern_field, feather_radius_px
             )
         )
+        previous_gray = current_gray
+        previous_homography = homography
     return output
+
+
+def _dense_flow_pattern_warp(
+    previous_pattern: np.ndarray,
+    previous_gray: np.ndarray,
+    current_gray: np.ndarray,
+    current_mask: np.ndarray,
+    first_frame_shape: tuple[int, int],
+    previous_homography: np.ndarray | None,
+    current_homography: np.ndarray | None,
+) -> tuple[np.ndarray, np.ndarray] | None:
+    """Warp a pattern field locally using forward/backward-consistent flow.
+
+    Flow is estimated on a reduced grayscale pair for speed. Pixels with poor
+    forward/backward consistency use the caller's global homography fallback.
+    """
+    height, width = current_gray.shape
+    flow_scale = min(1.0, 960.0 / max(height, width))
+    flow_width = max(2, int(round(width * flow_scale)))
+    flow_height = max(2, int(round(height * flow_scale)))
+    if flow_scale < 1.0:
+        previous_small = cv2.resize(
+            previous_gray, (flow_width, flow_height), interpolation=cv2.INTER_AREA
+        )
+        current_small = cv2.resize(
+            current_gray, (flow_width, flow_height), interpolation=cv2.INTER_AREA
+        )
+    else:
+        previous_small, current_small = previous_gray, current_gray
+
+    params = dict(
+        pyr_scale=0.5,
+        levels=3,
+        winsize=21,
+        iterations=3,
+        poly_n=5,
+        poly_sigma=1.2,
+        flags=0,
+    )
+    backward_small = cv2.calcOpticalFlowFarneback(
+        current_small, previous_small, None, **params
+    )
+    forward_small = cv2.calcOpticalFlowFarneback(
+        previous_small, current_small, None, **params
+    )
+    if flow_scale < 1.0:
+        backward = cv2.resize(
+            backward_small, (width, height), interpolation=cv2.INTER_LINEAR
+        )
+        forward = cv2.resize(
+            forward_small, (width, height), interpolation=cv2.INTER_LINEAR
+        )
+        backward[:, :, 0] /= flow_scale
+        backward[:, :, 1] /= flow_scale
+        forward[:, :, 0] /= flow_scale
+        forward[:, :, 1] /= flow_scale
+    else:
+        backward, forward = backward_small, forward_small
+
+    grid_x, grid_y = np.meshgrid(
+        np.arange(width, dtype=np.float32),
+        np.arange(height, dtype=np.float32),
+    )
+    map_x = grid_x + backward[:, :, 0]
+    map_y = grid_y + backward[:, :, 1]
+    forward_at_source = cv2.remap(
+        forward,
+        map_x,
+        map_y,
+        interpolation=cv2.INTER_LINEAR,
+        borderMode=cv2.BORDER_CONSTANT,
+        borderValue=0,
+    )
+    round_trip_error = np.linalg.norm(backward + forward_at_source, axis=2)
+    reliable = (
+        (current_mask > 0)
+        & np.isfinite(backward).all(axis=2)
+        & (map_x >= 0)
+        & (map_x < width)
+        & (map_y >= 0)
+        & (map_y < height)
+        & (round_trip_error < 1.75)
+    )
+    mask_pixels = int(np.count_nonzero(current_mask))
+    if mask_pixels == 0 or int(np.count_nonzero(reliable)) / mask_pixels < 0.30:
+        return None
+
+    # If sparse tracking says the surface moved but dense flow returns a near
+    # zero field everywhere, treat it as an untextured-flow failure.
+    if previous_homography is not None and current_homography is not None:
+        first_height, first_width = first_frame_shape
+        reference = np.array(
+            [[first_width / 2.0, first_height / 2.0]], dtype=np.float32
+        )
+        previous_center = cv2.perspectiveTransform(
+            reference.reshape(1, 1, 2), previous_homography
+        ).reshape(2)
+        current_center = cv2.perspectiveTransform(
+            reference.reshape(1, 1, 2), current_homography
+        ).reshape(2)
+        expected_motion = float(np.linalg.norm(current_center - previous_center))
+        flow_magnitude = np.linalg.norm(backward, axis=2)
+        median_flow = float(np.median(flow_magnitude[current_mask > 0]))
+        if expected_motion > 3.0 and median_flow < 0.25:
+            return None
+
+    warped = cv2.remap(
+        previous_pattern,
+        map_x.astype(np.float32),
+        map_y.astype(np.float32),
+        interpolation=cv2.INTER_LINEAR,
+        borderMode=cv2.BORDER_WRAP,
+    )
+    return warped, reliable
 
 
 def _track_pattern_homographies(

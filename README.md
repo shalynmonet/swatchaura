@@ -6,7 +6,7 @@ The first demo targets are an airplane wing filmed from a window seat and a pers
 
 ## Project status
 
-This repository is being built milestone by milestone for the Meta Global AI Developer Hackathon (deadline: November 4, 2026). Milestones 1 and 2 (project scaffold and video read/write) are complete. Milestone 3 wraps Monogrammar's houndstooth geometry and adds uploaded swatch tiling. Milestone 4 adds GrabCut/optical-flow mock segmentation, mask caching, and the documented live SAM 3.1 path. Milestone 5 composites patterns into the masks while keeping source lighting and soft edges. Milestone 6 adds optical-flow tracking and homography-based surface warping, with automatic version 1 fallback when tracking is unreliable. Milestone 7 parses style descriptions into validated pattern settings using local rules or Muse Spark. Milestone 8 generates swatches locally or with Muse Image and passes them to the same video compositor. Milestone 9 provides the Streamlit upload, mask drawing, preview, and download flow.
+This repository is being built milestone by milestone for the Meta Global AI Developer Hackathon (deadline: November 4, 2026). Milestones 1 and 2 (project scaffold and video read/write) are complete. Milestone 3 wraps Monogrammar's houndstooth geometry and adds uploaded swatch tiling. Milestone 4 adds GrabCut/optical-flow mock segmentation, mask caching, and the documented live SAM 3.1 path. Milestone 5 composites patterns into the masks while keeping source lighting and soft edges. Milestone 6 combines homography placement with dense optical-flow deformation for local surface movement and automatic fallback. Milestone 7 parses style descriptions into validated pattern settings using local rules or Muse Spark. Milestone 8 generates swatches locally or with Muse Image and passes them to the same video compositor. Milestone 9 provides the Streamlit upload, mask drawing, preview, and download flow.
 
 ## Requirements
 
@@ -193,7 +193,7 @@ Open `sample_composited.mp4` to inspect the before/after effect. The generated s
 
 ## Surface tracking (Milestone 6)
 
-Pass `track_surface=True` to `composite_video(...)` to track Shi-Tomasi feature points inside the first-frame mask with pyramidal Lucas-Kanade optical flow. RANSAC estimates a homography from frame 1 to each later frame, and the tiled pattern is warped through that transform before the usual lighting and mask blend. If too few reliable tracks remain or the homography fit fails, that frame automatically uses the version 1 image-space pattern. Low-texture objects often trigger the fallback, so the mode remains usable on clips where feature tracking cannot lock on.
+Pass `track_surface=True` to `composite_video(...)` to track Shi-Tomasi feature points inside the first-frame mask with pyramidal Lucas-Kanade optical flow. RANSAC estimates a global homography, and dense forward/backward-checked optical flow locally deforms the pattern between adjacent frames. This lets the print respond to visible bends and non-rigid motion instead of moving as one flat plane. When local flow is unreliable, the global homography is used; when both tracking methods fail, the compositor uses version 1 for that frame. Low-texture or stationary regions may not provide enough visual information for local deformation.
 
 This example makes a small moving textured patch so optical flow has visual features to follow. With the virtual environment active, run:
 

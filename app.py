@@ -175,37 +175,60 @@ def _draw_outline(
         key=canvas_key,
     )
     drawing = canvas_result.json_data or {}
-    polygon = next(
-        (
-            shape
-            for shape in drawing.get("objects", [])
-            if str(shape.get("type", "")).lower() == "polygon"
-        ),
-        None,
+    outline = _polygon_drawing_to_mask(
+        drawing,
+        frame_width=frame_width,
+        frame_height=frame_height,
+        canvas_width=canvas_width,
+        canvas_height=canvas_height,
     )
-    if not polygon:
+    if outline is None:
         return None, None
+    return outline, f"Outline contains {int(np.count_nonzero(outline)):,} pixels."
 
-    offset = polygon.get("pathOffset") or {}
-    points = polygon.get("points") or []
-    if len(points) < 3:
-        return None, None
+
+def _polygon_drawing_to_mask(
+    drawing: dict,
+    *,
+    frame_width: int,
+    frame_height: int,
+    canvas_width: int,
+    canvas_height: int,
+) -> np.ndarray | None:
+    """Combine every closed canvas polygon into one source-frame mask."""
+    polygons = [
+        shape
+        for shape in drawing.get("objects", [])
+        if str(shape.get("type", "")).lower() == "polygon"
+    ]
+    if not polygons:
+        return None
+
     scale_x = frame_width / canvas_width
     scale_y = frame_height / canvas_height
-    canvas_points = np.asarray(
-        [
-            [
-                (float(point["x"]) + float(offset.get("x", 0))) * scale_x,
-                (float(point["y"]) + float(offset.get("y", 0))) * scale_y,
-            ]
-            for point in points
-        ],
-        dtype=np.float32,
-    )
-    vertices = np.round(canvas_points).astype(np.int32)
     outline = np.zeros((frame_height, frame_width), dtype=np.uint8)
-    cv2.fillPoly(outline, [vertices], 255)
-    return outline, f"Outline contains {int(np.count_nonzero(outline)):,} pixels."
+    polygon_count = 0
+    for polygon in polygons:
+        offset = polygon.get("pathOffset") or {}
+        points = polygon.get("points") or []
+        if len(points) < 3:
+            continue
+        canvas_points = np.asarray(
+            [
+                [
+                    (float(point["x"]) + float(offset.get("x", 0))) * scale_x,
+                    (float(point["y"]) + float(offset.get("y", 0))) * scale_y,
+                ]
+                for point in points
+            ],
+            dtype=np.float32,
+        )
+        vertices = np.round(canvas_points).astype(np.int32)
+        cv2.fillPoly(outline, [vertices], 255)
+        polygon_count += 1
+    if not polygon_count:
+        return None
+    return outline
 
 
 def _make_pattern(
@@ -309,7 +332,7 @@ def main() -> None:
     canvas_key = f"object-mask-{st.session_state['clip_digest'][:12]}-{processing_width}x{processing_height}-{mask_method}"
     if mask_method == "Draw precise outline":
         st.subheader("Trace the object on frame 1")
-        st.caption("Click the outline corners, then click the first point to close the polygon. The shape is tracked through the clip.")
+        st.caption("Click the outline corners, then click the first point to close each polygon. Draw multiple separate areas if needed; they are combined and tracked through the clip.")
         manual_outline, outline_caption = _draw_outline(
             processing_frames[0], canvas_key
         )
@@ -350,7 +373,7 @@ def main() -> None:
         render_clicked = st.form_submit_button("Generate preview", type="primary")
 
     if render_clicked:
-        if not object_prompt.strip():
+        if not object_prompt.strip() and mask_method != "Draw precise outline":
             st.error("Describe which object should receive the pattern.")
         elif mask_method == "Draw precise outline" and manual_outline is None:
             st.error("Trace and close an outline around the object before rendering.")
@@ -375,7 +398,7 @@ def main() -> None:
                 if mask_method == "Draw precise outline":
                     masks = get_video_masks(
                         processing_frames,
-                        object_prompt,
+                        object_prompt.strip() or "manually outlined object",
                         mock_mode=True,
                         first_frame_mask=manual_outline,
                         video_fps=fps,
