@@ -6,7 +6,7 @@ The first demo targets are an airplane wing filmed from a window seat and a pers
 
 ## Project status
 
-This repository is being built milestone by milestone for the Meta Global AI Developer Hackathon (deadline: November 4, 2026). Milestones 1 and 2 (project scaffold and video read/write) are complete. Milestone 3 can repeat uploaded swatch images and is waiting for the existing Monogrammar pattern source so SwatchAura can wrap its matching logic. Milestone 4 adds mock segmentation and mask caching; live SAM 3.1 wiring is waiting for the official API docs.
+This repository is being built milestone by milestone for the Meta Global AI Developer Hackathon (deadline: November 4, 2026). Milestones 1 and 2 (project scaffold and video read/write) are complete. Milestone 3 wraps Monogrammar's houndstooth geometry, adds uploaded swatch tiling, and is ready for review. Milestone 4 adds mock segmentation and mask caching; live SAM 3.1 wiring is waiting for the official API docs.
 
 ## Requirements
 
@@ -112,6 +112,31 @@ When the official Meta Model API docs are available, the SAM 3.1 call will be im
 ## Uploaded swatch tiling (Milestone 3)
 
 `swatchaura.patterns.tile_swatch(source, output_size, scale=..., rotation=...)` repeats an image to fill `(width, height)`. It accepts an OpenCV image array, an image path, or encoded upload bytes (for example, a Streamlit upload's `getvalue()`). `scale` sets the size of each repeat and `rotation` turns each repeat. A non-tileable source can have visible joins; uploaded tileable swatches repeat cleanly.
+
+## Houndstooth pattern (Milestone 3)
+
+`swatchaura.patterns.generate_houndstooth_tile(color1, color2, scale=..., rotation=...)` ports the traced tooth polygon and 100-unit repeat lattice from Monogrammar's `src/pattern/houndstooth.ts`. It renders the two hex colors to a compact seamless BGR image, using supersampling for smooth diagonal edges. Scale changes the tooth and repeat size. Rotation turns each tooth inside its repeat cell so the output still tiles cleanly.
+
+To create two preview images and open them in Windows, run this from the project folder with the virtual environment active:
+
+```powershell
+@'
+import cv2
+from swatchaura.patterns import generate_houndstooth_tile, tile_swatch
+
+tile = generate_houndstooth_tile(
+    color1="#F3E3C9",
+    color2="#8B3A2B",
+    scale=1.0,
+    rotation=0,
+)
+cv2.imwrite("houndstooth_tile.png", tile)
+preview = tile_swatch(tile, (600, 400), scale=1.0)
+cv2.imwrite("houndstooth_preview.png", preview)
+print(f"Tile: {tile.shape[1]} x {tile.shape[0]}; preview saved.")
+'@ | python -
+Start-Process .\houndstooth_preview.png
+```
 
 ## Planned build
 
