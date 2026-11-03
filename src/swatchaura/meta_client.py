@@ -177,7 +177,11 @@ def _result_to_frame_masks(
 
         mask_height = int(record.mask.height)
         mask_width = int(record.mask.width)
-        raster = np.asarray(decode_mask_to_raster(record.mask), dtype=np.uint8)
+        decoded = decode_mask_to_raster(record.mask)
+        if isinstance(decoded, (bytes, bytearray, memoryview)):
+            raster = np.frombuffer(decoded, dtype=np.uint8)
+        else:
+            raster = np.asarray(decoded, dtype=np.uint8).reshape(-1)
         if raster.size != mask_height * mask_width:
             raise ValueError("SAM mask dimensions do not match its decoded raster.")
         raster = raster.reshape(mask_height, mask_width)
