@@ -62,13 +62,13 @@ With the virtual environment active and dependencies installed, start the UI fro
 python -m streamlit run app.py
 ```
 
-Upload an MP4 or MOV, describe the object, enter the style, and click **Generate preview**. In mock mode, draw a rectangle around the object on the first-frame canvas; GrabCut refines the mask and local rules generate the style. You can upload a swatch image or enter a separate swatch prompt. In live mode, SAM 3.1 handles the object prompt and Muse Spark parses the style; a swatch prompt invokes Muse Image. Select **Before** or **After** to preview either clip, then download the rendered MP4.
+Upload an MP4 or MOV, describe the object, enter the style, and click **Generate preview**. In mock mode, choose **Automatic segmentation** to draw a snug rectangle for GrabCut, or choose **Draw precise outline** to trace the object's silhouette on frame one. The traced mask is tracked through the clip and cached. In live mode, SAM 3.1 handles the object prompt; choose **Draw precise outline** when its mask needs manual correction. The **Mask** preview shows the selected first-frame area, and **Tighten mask edges** shrinks the selection if it includes too much background. Local rules generate styles in mock mode. You can upload a swatch image or enter a separate swatch prompt. In live mode, Muse Spark parses the style and a swatch prompt invokes Muse Image. Select **Before**, **Mask**, or **After**, then download the rendered MP4.
 
-The sidebar processes a smaller video by default for speed and can export the result at the source video's resolution. The prototype preserves frame rate but does not retain source audio. The drawing control is provided by `streamlit-drawable-canvas` 0.13, which requires Streamlit 1.53 or newer.
+The sidebar processes a smaller video by default for speed and can export the result at the source video's resolution. The prototype preserves frame rate but does not retain source audio. The drawing control is provided by `streamlit-drawable-canvas` 0.13, which requires Streamlit 1.53 or newer. The MP4 writer uses H.264 baseline encoding for browser playback.
 
 ## Video I/O (Milestone 2)
 
-`swatchaura.video_io.read_video(path)` reads a clip into OpenCV BGR frames and returns the original frames per second. `swatchaura.video_io.write_video(frames, path, fps)` writes those frames to an MP4 at the provided frame rate. Video resizing and visual effects will be added in later milestones.
+`swatchaura.video_io.read_video(path)` reads a clip into OpenCV BGR frames and returns the original frames per second. `swatchaura.video_io.write_video(frames, path, fps)` writes those frames to an H.264 MP4 at the provided frame rate, for browser playback. `imageio-ffmpeg` supplies the encoder on Windows, macOS, and Linux. Video resizing and visual effects will be added in later milestones.
 
 To quickly check the read/write helpers, activate the virtual environment and run this PowerShell here-string. It makes a tiny synthetic clip, reads it, writes a copy, then prints the frame count and frame rate:
 

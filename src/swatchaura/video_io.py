@@ -7,6 +7,7 @@ color conversions in later image-processing steps.
 from pathlib import Path
 
 import cv2
+import imageio_ffmpeg
 import numpy as np
 
 
@@ -82,20 +83,32 @@ def write_video(
 
     path = Path(output_path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    writer = cv2.VideoWriter(
-        str(path), cv2.VideoWriter_fourcc(*"mp4v"), float(fps), (width, height)
+    # MPEG-4 Part 2 (`mp4v`) is not supported by many browser video players.
+    # H.264 baseline in yuv420p is broadly playable in browsers and Windows.
+    encoder = imageio_ffmpeg.write_frames(
+        str(path),
+        (width, height),
+        fps=float(fps),
+        codec="libx264",
+        pix_fmt_in="rgb24",
+        pix_fmt_out="yuv420p",
+        quality=7,
+        macro_block_size=1,
+        output_params=[
+            "-preset",
+            "veryfast",
+            "-profile:v",
+            "baseline",
+            "-movflags",
+            "+faststart",
+        ],
     )
-    if not writer.isOpened():
-        writer.release()
-        raise ValueError(
-            f"OpenCV could not create an MP4 writer for: {path}. "
-            "Try a different output folder or codec on this system."
-        )
-
     try:
+        encoder.send(None)
         for frame in frames:
-            writer.write(frame)
+            rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            encoder.send(np.ascontiguousarray(rgb_frame).tobytes())
     finally:
-        writer.release()
+        encoder.close()
 
     return path

@@ -54,13 +54,20 @@ def _cache_path(
     object_prompt: str,
     mock_mode: bool,
     first_frame_box: Box | None,
+    first_frame_mask: np.ndarray | None,
     cache_dir: str | Path,
 ) -> Path:
+    mask_digest = None
+    if first_frame_mask is not None:
+        mask_digest = hashlib.sha256(
+            np.ascontiguousarray(first_frame_mask).tobytes()
+        ).hexdigest()
     identity = {
         "video": _video_fingerprint(frames),
         "prompt": object_prompt.strip(),
         "mock_mode": mock_mode,
         "box": first_frame_box,
+        "first_frame_mask": mask_digest,
         "version": 1,
     }
     key = hashlib.sha256(
@@ -229,12 +236,31 @@ def segment_video_mock(
     return masks
 
 
+def track_mask_from_first_frame(
+    frames: list[np.ndarray], first_mask: np.ndarray
+) -> list[np.ndarray]:
+    """Use a user-drawn binary outline on frame one, then track it over time."""
+    _validate_frames(frames)
+    if first_mask.shape != frames[0].shape[:2]:
+        raise ValueError(
+            f"Outline mask shape {first_mask.shape} must match frame {frames[0].shape[:2]}."
+        )
+    binary = np.where(np.asarray(first_mask) > 0, 255, 0).astype(np.uint8)
+    if not np.any(binary):
+        raise ValueError("Draw a closed outline around the object before rendering.")
+    masks = [binary]
+    for index in range(1, len(frames)):
+        masks.append(_track_mask_affine(frames[index - 1], frames[index], masks[-1]))
+    return masks
+
+
 def get_video_masks(
     frames: list[np.ndarray],
     object_prompt: str,
     *,
     mock_mode: bool | None = None,
     first_frame_box: Box | None = None,
+    first_frame_mask: np.ndarray | None = None,
     video_path: str | Path | None = None,
     video_fps: float = 24.0,
     cache_dir: str | Path = DEFAULT_MASK_CACHE,
@@ -246,11 +272,24 @@ def get_video_masks(
     width, height = _validate_frames(frames)
     if not object_prompt.strip():
         raise ValueError("Describe the object you want to pattern.")
-    if mock_mode and first_frame_box is None:
-        raise ValueError("Mock segmentation needs a rough box around the object on frame 1.")
+    if first_frame_box is not None and first_frame_mask is not None:
+        raise ValueError("Provide either a first-frame box or an outline mask, not both.")
+    if mock_mode and first_frame_box is None and first_frame_mask is None:
+        raise ValueError("Mock segmentation needs a rough box or a first-frame outline.")
+    if first_frame_mask is not None and not mock_mode:
+        raise ValueError("A manually drawn outline is only used by mock tracking mode.")
+    if first_frame_mask is not None and first_frame_mask.shape != (height, width):
+        raise ValueError(
+            f"Outline mask shape {first_frame_mask.shape} must match {(height, width)}."
+        )
 
     cache_path = _cache_path(
-        frames, object_prompt, mock_mode, first_frame_box, cache_dir
+        frames,
+        object_prompt,
+        mock_mode,
+        first_frame_box,
+        first_frame_mask,
+        cache_dir,
     )
     if use_cache:
         cached = _read_cached_masks(cache_path, len(frames), (height, width))
@@ -258,8 +297,11 @@ def get_video_masks(
             return cached
 
     if mock_mode:
-        assert first_frame_box is not None
-        masks = segment_video_mock(frames, first_frame_box)
+        if first_frame_mask is not None:
+            masks = track_mask_from_first_frame(frames, first_frame_mask)
+        else:
+            assert first_frame_box is not None
+            masks = segment_video_mock(frames, first_frame_box)
     else:
         masks = segment_video_with_sam31(
             frames,

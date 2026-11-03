@@ -61,6 +61,37 @@ def _resize_frames(
     return resized
 
 
+def _tighten_masks(
+    masks: list[np.ndarray], radius: int
+) -> list[np.ndarray]:
+    """Shrink coarse mask edges slightly and discard stray boundary pixels."""
+    if radius <= 0:
+        return masks
+    kernel_size = 2 * int(radius) + 1
+    kernel = cv2.getStructuringElement(
+        cv2.MORPH_ELLIPSE, (kernel_size, kernel_size)
+    )
+    return [cv2.erode(mask, kernel, iterations=1) for mask in masks]
+
+
+def _mask_overlay(frame: np.ndarray, mask: np.ndarray) -> np.ndarray:
+    """Tint the selected object so mask quality is easy to inspect."""
+    overlay = frame.copy()
+    selected = mask > 0
+    tint = np.zeros_like(frame)
+    tint[:] = (40, 205, 165)
+    overlay[selected] = cv2.addWeighted(
+        frame[selected], 0.48, tint[selected], 0.52, 0
+    )
+    contours, _ = cv2.findContours(
+        np.asarray(mask > 0, dtype=np.uint8),
+        cv2.RETR_EXTERNAL,
+        cv2.CHAIN_APPROX_SIMPLE,
+    )
+    cv2.drawContours(overlay, contours, -1, (0, 255, 220), 1)
+    return overlay
+
+
 def _draw_box(
     first_frame: np.ndarray, canvas_key: str
 ) -> tuple[tuple[int, int, int, int] | None, str | None]:
@@ -106,6 +137,68 @@ def _draw_box(
     x1 = min(max(x0 + 1, x1), frame_width)
     y1 = min(max(y0 + 1, y1), frame_height)
     return (x0, y0, x1 - x0, y1 - y0), f"Box: x={x0}, y={y0}, w={x1 - x0}, h={y1 - y0}"
+
+
+def _draw_outline(
+    first_frame: np.ndarray, canvas_key: str
+) -> tuple[np.ndarray | None, str | None]:
+    """Let a user trace an exact first-frame silhouette as a polygon."""
+    frame_height, frame_width = first_frame.shape[:2]
+    canvas_scale = min(
+        1.0,
+        MAX_CANVAS_WIDTH / frame_width,
+        MAX_CANVAS_HEIGHT / frame_height,
+    )
+    canvas_width = max(2, int(round(frame_width * canvas_scale)))
+    canvas_height = max(2, int(round(frame_height * canvas_scale)))
+    rgb = cv2.cvtColor(first_frame, cv2.COLOR_BGR2RGB)
+    background = Image.fromarray(rgb).resize(
+        (canvas_width, canvas_height), Image.Resampling.LANCZOS
+    )
+    canvas_result = st_canvas(
+        fill_color="rgba(20, 184, 166, 0.22)",
+        stroke_color="#14B8A6",
+        stroke_width=3,
+        background_image=background,
+        background_image_fit="stretch",
+        update_streamlit=True,
+        height=canvas_height,
+        width=canvas_width,
+        drawing_mode="polygon",
+        key=canvas_key,
+    )
+    drawing = canvas_result.json_data or {}
+    polygon = next(
+        (
+            shape
+            for shape in drawing.get("objects", [])
+            if str(shape.get("type", "")).lower() == "polygon"
+        ),
+        None,
+    )
+    if not polygon:
+        return None, None
+
+    offset = polygon.get("pathOffset") or {}
+    points = polygon.get("points") or []
+    if len(points) < 3:
+        return None, None
+    scale_x = frame_width / canvas_width
+    scale_y = frame_height / canvas_height
+    canvas_points = np.asarray(
+        [
+            [
+                (float(point["x"]) + float(offset.get("x", 0))) * scale_x,
+                (float(point["y"]) + float(offset.get("y", 0))) * scale_y,
+            ]
+            for point in points
+        ],
+        dtype=np.float32,
+    )
+    vertices = np.round(canvas_points).astype(np.int32)
+    outline = np.zeros((frame_height, frame_width), dtype=np.uint8)
+    cv2.fillPoly(outline, [vertices], 255)
+    return outline, f"Outline contains {int(np.count_nonzero(outline)):,} pixels."
 
 
 def _make_pattern(
@@ -171,6 +264,11 @@ def main() -> None:
 
     with st.sidebar:
         st.header("Processing")
+        mask_method = st.selectbox(
+            "Mask method",
+            ("Automatic segmentation", "Draw precise outline"),
+            help="Use a traced outline when automatic masks include extra scenery or miss part of the object.",
+        )
         resolution_scale = st.select_slider(
             "Processing resolution",
             options=(0.25, 0.5, 0.75, 1.0),
@@ -182,20 +280,38 @@ def main() -> None:
             "Export at original resolution", value=False
         )
         track_surface = st.checkbox("Track print across the surface", value=True)
+        mask_tightening = st.slider(
+            "Tighten mask edges",
+            min_value=0,
+            max_value=10,
+            value=2,
+            help="Erodes the selected area by this many processing pixels. Use a larger value to pull a loose mask inward.",
+        )
 
     processing_frames = _resize_frames(original_frames, resolution_scale)
     processing_height, processing_width = processing_frames[0].shape[:2]
     mock_box = None
-    canvas_key = f"object-box-{st.session_state['clip_digest'][:12]}-{processing_width}x{processing_height}"
-    if mock_mode:
+    manual_outline = None
+    canvas_key = f"object-mask-{st.session_state['clip_digest'][:12]}-{processing_width}x{processing_height}-{mask_method}"
+    if mask_method == "Draw precise outline":
+        st.subheader("Trace the object on frame 1")
+        st.caption("Click the outline corners, then click the first point to close the polygon. The shape is tracked through the clip.")
+        manual_outline, outline_caption = _draw_outline(
+            processing_frames[0], canvas_key
+        )
+        if outline_caption:
+            st.caption(outline_caption)
+        else:
+            st.caption("Draw at least three points and close the outline.")
+    elif mock_mode:
         st.subheader("Mark the object on frame 1")
-        st.caption("Draw a box around the object. GrabCut refines its edge and tracks it through the clip.")
+        st.caption("Draw a snug box around only the surface you want patterned. GrabCut refines its edge and tracks it through the clip.")
         mock_box, box_caption = _draw_box(processing_frames[0], canvas_key)
         if box_caption:
             st.caption(box_caption)
         else:
             st.caption("Click and drag a rectangle around the object to continue.")
-    else:
+    elif mask_method == "Automatic segmentation":
         st.subheader("Describe the object")
         st.caption("SAM 3.1 will locate and track it through the uploaded clip.")
 
@@ -222,7 +338,9 @@ def main() -> None:
     if render_clicked:
         if not object_prompt.strip():
             st.error("Describe which object should receive the pattern.")
-        elif mock_mode and mock_box is None:
+        elif mask_method == "Draw precise outline" and manual_outline is None:
+            st.error("Trace and close an outline around the object before rendering.")
+        elif mock_mode and mask_method == "Automatic segmentation" and mock_box is None:
             st.error("Draw a box around the object on frame 1 before rendering.")
         else:
             try:
@@ -240,13 +358,27 @@ def main() -> None:
                 progress.progress(15, text="Segmenting the object…")
                 # Use the already downscaled frames for live SAM too, so returned
                 # mask coordinates match this processing resolution.
-                masks = get_video_masks(
-                    processing_frames,
-                    object_prompt,
-                    mock_mode=mock_mode,
-                    first_frame_box=mock_box,
-                    video_fps=fps,
-                )
+                if mask_method == "Draw precise outline":
+                    masks = get_video_masks(
+                        processing_frames,
+                        object_prompt,
+                        mock_mode=True,
+                        first_frame_mask=manual_outline,
+                        video_fps=fps,
+                    )
+                else:
+                    masks = get_video_masks(
+                        processing_frames,
+                        object_prompt,
+                        mock_mode=mock_mode,
+                        first_frame_box=mock_box,
+                        video_fps=fps,
+                    )
+                masks = _tighten_masks(masks, mask_tightening)
+                if not any(np.any(mask) for mask in masks):
+                    raise ValueError(
+                        "Mask tightening removed the whole selection. Lower the slider value and render again."
+                    )
 
                 if export_full_resolution:
                     output_frames = original_frames
@@ -282,6 +414,10 @@ def main() -> None:
                 st.session_state["rendered_video"] = result_bytes
                 st.session_state["rendered_name"] = Path(uploaded_video.name).stem + "_swatchaura.mp4"
                 st.session_state["render_settings"] = settings.to_dict()
+                st.session_state["mask_overlay"] = cv2.cvtColor(
+                    _mask_overlay(output_frames[0], output_masks[0]),
+                    cv2.COLOR_BGR2RGB,
+                )
                 progress.progress(100, text="Preview ready.")
             except Exception as exc:
                 st.error(f"Rendering failed: {exc}")
@@ -294,12 +430,19 @@ def main() -> None:
         st.subheader("Preview")
         preview_choice = st.radio(
             "Show",
-            ("Before", "After"),
+            ("Before", "Mask", "After"),
             horizontal=True,
-            index=1,
+            index=2,
             key=f"preview-toggle-{st.session_state['clip_digest'][:12]}",
         )
-        st.video(video_bytes if preview_choice == "Before" else result_bytes)
+        if preview_choice == "Mask":
+            st.image(
+                st.session_state["mask_overlay"],
+                caption="First-frame selection: turquoise shows the pixels receiving the pattern.",
+                use_container_width=True,
+            )
+        else:
+            st.video(video_bytes if preview_choice == "Before" else result_bytes)
         st.download_button(
             "Download processed video",
             data=result_bytes,

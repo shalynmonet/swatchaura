@@ -3,6 +3,7 @@ streamlit>=1.53,<2.0
 streamlit-drawable-canvas>=0.13,<0.14
 opencv-python>=4.10,<5.0
 numpy>=2.0,<3.0
+imageio-ffmpeg>=0.6,<1.0
 
 # Load local configuration from .env
 python-dotenv>=1.0,<2.0
