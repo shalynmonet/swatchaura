@@ -6,7 +6,7 @@ The first demo targets are an airplane wing filmed from a window seat and a pers
 
 ## Project status
 
-This repository is being built milestone by milestone for the Meta Global AI Developer Hackathon (deadline: November 4, 2026). Milestones 1 and 2 (project scaffold and video read/write) are complete. Milestone 3 wraps Monogrammar's houndstooth geometry and adds uploaded swatch tiling. Milestone 4 adds GrabCut/optical-flow mock segmentation, mask caching, and the documented live SAM 3.1 path. Milestone 5 composites patterns into the masks while keeping source lighting and soft edges. Milestone 6 adds optical-flow tracking and homography-based surface warping, with automatic version 1 fallback when tracking is unreliable. Milestone 7 parses style descriptions into validated pattern settings using local rules or Muse Spark. Milestone 8 generates swatches locally or with Muse Image and passes them to the same video compositor.
+This repository is being built milestone by milestone for the Meta Global AI Developer Hackathon (deadline: November 4, 2026). Milestones 1 and 2 (project scaffold and video read/write) are complete. Milestone 3 wraps Monogrammar's houndstooth geometry and adds uploaded swatch tiling. Milestone 4 adds GrabCut/optical-flow mock segmentation, mask caching, and the documented live SAM 3.1 path. Milestone 5 composites patterns into the masks while keeping source lighting and soft edges. Milestone 6 adds optical-flow tracking and homography-based surface warping, with automatic version 1 fallback when tracking is unreliable. Milestone 7 parses style descriptions into validated pattern settings using local rules or Muse Spark. Milestone 8 generates swatches locally or with Muse Image and passes them to the same video compositor. Milestone 9 provides the Streamlit upload, mask drawing, preview, and download flow.
 
 ## Requirements
 
@@ -52,7 +52,19 @@ python --version
 python -m pip show streamlit opencv-python numpy python-dotenv
 ```
 
-Python 3.12 works for this project; the minimum supported version is 3.11. The Streamlit application entry point will be added in a later milestone.
+Python 3.12 works for this project; the minimum supported version is 3.11.
+
+## Run the Streamlit app (Milestone 9)
+
+With the virtual environment active and dependencies installed, start the UI from the project folder:
+
+```powershell
+python -m streamlit run app.py
+```
+
+Upload an MP4 or MOV, describe the object, enter the style, and click **Generate preview**. In mock mode, draw a rectangle around the object on the first-frame canvas; GrabCut refines the mask and local rules generate the style. You can upload a swatch image or enter a separate swatch prompt. In live mode, SAM 3.1 handles the object prompt and Muse Spark parses the style; a swatch prompt invokes Muse Image. Select **Before** or **After** to preview either clip, then download the rendered MP4.
+
+The sidebar processes a smaller video by default for speed and can export the result at the source video's resolution. The prototype preserves frame rate but does not retain source audio. The drawing control is provided by `streamlit-drawable-canvas` 0.13, which requires Streamlit 1.53 or newer.
 
 ## Video I/O (Milestone 2)
 
@@ -311,7 +323,7 @@ Start-Process .\houndstooth_preview.png
 6. Optical-flow tracking and homography-based pattern placement, with automatic fallback (implemented)
 7. Validated Muse Spark style settings (implemented)
 8. Muse Image swatch generation (implemented)
-9. Streamlit upload, preview, before/after, and download interface
+9. Streamlit upload, preview, before/after, and download interface (implemented)
 10. Progress, error handling, sample clips, and final model documentation
 
 ## Meta model integration

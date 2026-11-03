@@ -1,5 +1,6 @@
 # Core app and image/video processing dependencies
-streamlit>=1.38,<2.0
+streamlit>=1.53,<2.0
+streamlit-drawable-canvas>=0.13,<0.14
 opencv-python>=4.10,<5.0
 numpy>=2.0,<3.0
 
