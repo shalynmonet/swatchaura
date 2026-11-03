@@ -1,0 +1,7 @@
+# Core app and image/video processing dependencies
+streamlit>=1.38,<2.0
+opencv-python>=4.10,<5.0
+numpy>=2.0,<3.0
+
+# Load local configuration from .env
+python-dotenv>=1.0,<2.0
