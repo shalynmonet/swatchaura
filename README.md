@@ -90,7 +90,7 @@ frames = []
 for index in range(12):
     frame = np.full((120, 160, 3), (45, 45, 45), dtype=np.uint8)
     x = 62 + index * 2
-    cv2.rectangle(frame, (x, 42), (x + 34, 78), (30, 80, 230), thickness=-1)
+    cv2.rectangle(frame, (x, 42), (x + 34, 78), (230, 80, 30), thickness=-1)
     frames.append(frame)
 
 write_video(frames, "sample_segmentation.mp4", 12)
@@ -109,7 +109,7 @@ print(f"Cached mask files: {len(list(__import__('pathlib').Path('cache/masks').g
 
 The live SAM 3.1 call is isolated in `swatchaura.meta_client` and follows Meta's documented `/v1/files` upload and streaming `/v1/responses` flow, parsed with `meta-sam-parser`. It reads the project's `META_API_KEY` from `.env`. In live mode, the source clip is uploaded to Meta Model API with `purpose="user_data"`. The first-frame box can be supplied from a UI drawing control when the Streamlit milestone is reached.
 
-To exercise the live path with an existing clip, switch the local `.env` setting to `MOCK_MODE=false`, then run this in PowerShell. This sends the clip to Meta Model API and uses your API access:
+First run the mock example above once; it creates `sample_segmentation.mp4` with a blue rectangle. Then switch the local `.env` setting to `MOCK_MODE=false` and run this in PowerShell. This sends the clip to Meta Model API and uses your API access. Replace the path with your own MP4 or MOV to test another clip.
 
 ```powershell
 @'
