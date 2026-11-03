@@ -267,7 +267,10 @@ def main() -> None:
 
     mock_mode = mock_mode_enabled()
     if mock_mode:
-        st.info("Mock mode is on. Segmentation and swatch generation run locally without Meta API calls.")
+        st.info(
+            "Mock mode is on. Local mask methods and swatch generation need no API calls. "
+            "Selecting automatic SAM segmentation makes a Meta API call for that step."
+        )
     else:
         st.warning("Live mode is on. Rendering can call SAM 3.1, Muse Spark, or Muse Image and use API access.")
 
@@ -292,18 +295,27 @@ def main() -> None:
         f"{first.shape[1]} × {first.shape[0]} pixels"
     )
 
+    object_prompt = st.text_input(
+        "What should be patterned?",
+        placeholder="the airplane wing, her jacket, the blue suitcase",
+        help="In automatic SAM mode this description locates and tracks the object. "
+        "Mock tracing modes use a box or outline instead.",
+    )
+
     with st.sidebar:
         st.header("Processing")
-        automatic_mask_label = (
-            "GrabCut from box" if mock_mode else "Automatic (SAM text prompt)"
+        mask_methods = (
+            "Automatic (SAM text prompt)",
+            "GrabCut from box",
+            "Draw precise outline",
         )
         mask_method = st.selectbox(
             "Mask method",
-            ("Draw precise outline", automatic_mask_label),
-            index=0 if mock_mode else 1,
+            mask_methods,
+            index=1 if mock_mode else 0,
             help=(
-                "In mock mode, GrabCut needs a box and does not understand the text prompt. "
-                "In live mode, SAM segments the object from the text prompt without a box."
+                "Automatic SAM uses your object description and makes a Meta API call. "
+                "GrabCut and drawing run locally but need a first-frame selection."
             ),
         )
         resolution_scale = st.select_slider(
@@ -340,7 +352,7 @@ def main() -> None:
             st.caption(outline_caption)
         else:
             st.caption("Draw at least three points and close the outline.")
-    elif mock_mode and mask_method == "GrabCut from box":
+    elif mask_method == "GrabCut from box":
         st.subheader("Mark the object on frame 1")
         st.caption("Draw a snug box around only the surface you want patterned. GrabCut refines its edge and tracks it through the clip; this mock does not interpret the object text prompt.")
         mock_box, box_caption = _draw_box(processing_frames[0], canvas_key)
@@ -350,13 +362,15 @@ def main() -> None:
             st.caption("Click and drag a rectangle around the object to continue.")
     elif mask_method == "Automatic (SAM text prompt)":
         st.subheader("Describe the object")
-        st.caption("SAM 3.1 will locate and track it through the uploaded clip.")
+        if mock_mode:
+            st.warning(
+                "This selection sends the clip and object description to Meta SAM 3.1 "
+                "for segmentation, even though mock mode remains on for style and swatch generation."
+            )
+        else:
+            st.caption("SAM 3.1 will locate and track it through the uploaded clip.")
 
     with st.form("render-form"):
-        object_prompt = st.text_input(
-            "What should be patterned?",
-            placeholder="the airplane wing, her jacket, the blue suitcase",
-        )
         style_text = st.text_input(
             "Describe the style",
             value="gold and black houndstooth, bigger teeth",
@@ -407,7 +421,9 @@ def main() -> None:
                     masks = get_video_masks(
                         processing_frames,
                         object_prompt,
-                        mock_mode=mock_mode,
+                        # Choosing SAM explicitly opts this segmentation step
+                        # into live API use, even while other features stay mocked.
+                        mock_mode=(mask_method != "Automatic (SAM text prompt)"),
                         first_frame_box=mock_box,
                         video_fps=fps,
                     )
