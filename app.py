@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import sys
 import tempfile
 from pathlib import Path
 
@@ -11,6 +12,12 @@ import numpy as np
 import streamlit as st
 from PIL import Image
 from streamlit_drawable_canvas import st_canvas
+
+# Make `python -m streamlit run app.py` work directly from a source checkout,
+# even when the package has not yet been installed with `pip install -e .`.
+SOURCE_DIR = Path(__file__).resolve().parent / "src"
+if SOURCE_DIR.is_dir() and str(SOURCE_DIR) not in sys.path:
+    sys.path.insert(0, str(SOURCE_DIR))
 
 from swatchaura.compositing import composite_video
 from swatchaura.config import mock_mode_enabled

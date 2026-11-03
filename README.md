@@ -27,6 +27,8 @@ python -m pip install -e .
 Copy-Item .env.example .env
 ```
 
+The Streamlit entry point also adds the repository's `src` folder to Python's import path, so it can load the `swatchaura` package directly from a checkout. If you see `ModuleNotFoundError: No module named 'swatchaura'`, confirm PowerShell is in the project folder and run `python -m pip install -e .` in the active virtual environment.
+
 If PowerShell blocks virtual environment activation, run this for the current terminal session and activate again:
 
 ```powershell
