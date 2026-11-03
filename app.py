@@ -271,10 +271,17 @@ def main() -> None:
 
     with st.sidebar:
         st.header("Processing")
+        automatic_mask_label = (
+            "GrabCut from box" if mock_mode else "Automatic (SAM text prompt)"
+        )
         mask_method = st.selectbox(
             "Mask method",
-            ("Automatic segmentation", "Draw precise outline"),
-            help="Use a traced outline when automatic masks include extra scenery or miss part of the object.",
+            ("Draw precise outline", automatic_mask_label),
+            index=0 if mock_mode else 1,
+            help=(
+                "In mock mode, GrabCut needs a box and does not understand the text prompt. "
+                "In live mode, SAM segments the object from the text prompt without a box."
+            ),
         )
         resolution_scale = st.select_slider(
             "Processing resolution",
@@ -310,15 +317,15 @@ def main() -> None:
             st.caption(outline_caption)
         else:
             st.caption("Draw at least three points and close the outline.")
-    elif mock_mode:
+    elif mock_mode and mask_method == "GrabCut from box":
         st.subheader("Mark the object on frame 1")
-        st.caption("Draw a snug box around only the surface you want patterned. GrabCut refines its edge and tracks it through the clip.")
+        st.caption("Draw a snug box around only the surface you want patterned. GrabCut refines its edge and tracks it through the clip; this mock does not interpret the object text prompt.")
         mock_box, box_caption = _draw_box(processing_frames[0], canvas_key)
         if box_caption:
             st.caption(box_caption)
         else:
             st.caption("Click and drag a rectangle around the object to continue.")
-    elif mask_method == "Automatic segmentation":
+    elif mask_method == "Automatic (SAM text prompt)":
         st.subheader("Describe the object")
         st.caption("SAM 3.1 will locate and track it through the uploaded clip.")
 
@@ -347,7 +354,7 @@ def main() -> None:
             st.error("Describe which object should receive the pattern.")
         elif mask_method == "Draw precise outline" and manual_outline is None:
             st.error("Trace and close an outline around the object before rendering.")
-        elif mock_mode and mask_method == "Automatic segmentation" and mock_box is None:
+        elif mock_mode and mask_method == "GrabCut from box" and mock_box is None:
             st.error("Draw a box around the object on frame 1 before rendering.")
         else:
             try:
