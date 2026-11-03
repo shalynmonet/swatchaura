@@ -110,8 +110,15 @@ def composite_video(
     pattern_scale: float = 1.0,
     pattern_rotation: float = 0.0,
     feather_radius_px: float = 2.0,
+    track_surface: bool = False,
 ) -> list[np.ndarray]:
-    """Composite the same pattern into each frame using its corresponding mask."""
+    """Composite a pattern into each mask, optionally tracking the surface.
+
+    With ``track_surface=True``, feature points inside the first mask are
+    tracked through the clip. A homography maps the first-frame pattern into
+    each later frame. If a frame has too few reliable tracks, it uses the
+    ordinary image-space composite for that frame instead.
+    """
     if len(frames) != len(masks):
         raise ValueError(
             f"Got {len(frames)} frames and {len(masks)} masks; counts must match."
@@ -133,7 +140,106 @@ def composite_video(
         scale=pattern_scale,
         rotation=pattern_rotation,
     )
-    return [
-        _composite_with_tiled_pattern(frame, mask, tiled, feather_radius_px)
-        for frame, mask in zip(frames, masks)
-    ]
+    if not track_surface:
+        return [
+            _composite_with_tiled_pattern(frame, mask, tiled, feather_radius_px)
+            for frame, mask in zip(frames, masks)
+        ]
+
+    homographies = _track_pattern_homographies(frames, masks[0])
+    output: list[np.ndarray] = []
+    for frame, mask, homography in zip(frames, masks, homographies):
+        if homography is None:
+            output.append(
+                _composite_with_tiled_pattern(frame, mask, tiled, feather_radius_px)
+            )
+            continue
+
+        warped_pattern = cv2.warpPerspective(
+            tiled,
+            homography,
+            (frame_width, frame_height),
+            flags=cv2.INTER_LINEAR,
+            borderMode=cv2.BORDER_WRAP,
+        )
+        output.append(
+            _composite_with_tiled_pattern(
+                frame, mask, warped_pattern, feather_radius_px
+            )
+        )
+    return output
+
+
+def _track_pattern_homographies(
+    frames: list[np.ndarray], first_mask: np.ndarray
+) -> list[np.ndarray | None]:
+    """Track first-frame features and estimate first-to-current homographies.
+
+    ``None`` marks a frame where optical flow or the robust homography fit
+    failed; the caller should use the version 1 image-space composite there.
+    """
+    height, width = frames[0].shape[:2]
+    first_gray = cv2.cvtColor(frames[0], cv2.COLOR_BGR2GRAY)
+    feature_mask = np.where(first_mask > 0, 255, 0).astype(np.uint8)
+    reference_points = cv2.goodFeaturesToTrack(
+        first_gray,
+        maxCorners=500,
+        qualityLevel=0.01,
+        minDistance=5,
+        blockSize=7,
+        mask=feature_mask,
+    )
+    homographies: list[np.ndarray | None] = [np.eye(3, dtype=np.float64)]
+    if reference_points is None or len(reference_points) < 4:
+        return homographies + [None] * (len(frames) - 1)
+
+    reference_points = reference_points.reshape(-1, 2).astype(np.float32)
+    tracked_points = reference_points.copy()
+    previous_gray = first_gray
+    for frame in frames[1:]:
+        current_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        next_points, status, _ = cv2.calcOpticalFlowPyrLK(
+            previous_gray,
+            current_gray,
+            tracked_points.reshape(-1, 1, 2),
+            None,
+            winSize=(21, 21),
+            maxLevel=3,
+            criteria=(cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 30, 0.01),
+        )
+        homography: np.ndarray | None = None
+        if next_points is not None and status is not None:
+            next_flat = next_points.reshape(-1, 2)
+            valid = status.reshape(-1).astype(bool)
+            valid &= np.isfinite(next_flat).all(axis=1)
+            valid &= (next_flat[:, 0] >= 0) & (next_flat[:, 0] < width)
+            valid &= (next_flat[:, 1] >= 0) & (next_flat[:, 1] < height)
+            source = reference_points[valid]
+            target = next_flat[valid]
+            if len(source) >= 4:
+                candidate, inliers = cv2.findHomography(
+                    source, target, cv2.RANSAC, 3.0
+                )
+                if candidate is not None and inliers is not None:
+                    inlier_count = int(inliers.sum())
+                    inlier_ratio = inlier_count / len(source)
+                    if (
+                        inlier_count >= 6
+                        and inlier_ratio >= 0.35
+                        and np.isfinite(candidate).all()
+                    ):
+                        homography = candidate
+            # Carry only successfully tracked points into the next flow step,
+            # while retaining their matching frame-zero reference coordinates.
+            reference_points = reference_points[valid]
+            tracked_points = next_flat[valid]
+        else:
+            homographies.append(None)
+            homographies.extend([None] * (len(frames) - len(homographies)))
+            break
+        homographies.append(homography)
+        previous_gray = current_gray
+        if len(tracked_points) < 4:
+            homographies.extend([None] * (len(frames) - len(homographies)))
+            break
+    return homographies

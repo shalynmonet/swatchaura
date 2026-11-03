@@ -6,7 +6,7 @@ The first demo targets are an airplane wing filmed from a window seat and a pers
 
 ## Project status
 
-This repository is being built milestone by milestone for the Meta Global AI Developer Hackathon (deadline: November 4, 2026). Milestones 1 and 2 (project scaffold and video read/write) are complete. Milestone 3 wraps Monogrammar's houndstooth geometry and adds uploaded swatch tiling. Milestone 4 adds GrabCut/optical-flow mock segmentation, mask caching, and the documented live SAM 3.1 path. Milestone 5 composites patterns into the masks while keeping source lighting and soft edges.
+This repository is being built milestone by milestone for the Meta Global AI Developer Hackathon (deadline: November 4, 2026). Milestones 1 and 2 (project scaffold and video read/write) are complete. Milestone 3 wraps Monogrammar's houndstooth geometry and adds uploaded swatch tiling. Milestone 4 adds GrabCut/optical-flow mock segmentation, mask caching, and the documented live SAM 3.1 path. Milestone 5 composites patterns into the masks while keeping source lighting and soft edges. Milestone 6 adds optical-flow tracking and homography-based surface warping, with automatic version 1 fallback when tracking is unreliable.
 
 ## Requirements
 
@@ -133,7 +133,7 @@ For offline development, keep `MOCK_MODE=true` (or pass `mock_mode=True`) and pr
 
 ## Version 1 compositing (Milestone 5)
 
-`swatchaura.compositing.composite_frame(...)` and `composite_video(...)` tile a generated pattern or uploaded swatch into each object mask. The pattern lightness is shaded by the source frame's LAB luminance so folds, shadows, and highlights show through. A Gaussian feather softens mask edges. This is the reliable, image-space version; surface tracking and homography are Milestone 6.
+`swatchaura.compositing.composite_frame(...)` and `composite_video(...)` tile a generated pattern or uploaded swatch into each object mask. The pattern lightness is shaded by the source frame's LAB luminance so folds, shadows, and highlights show through. A Gaussian feather softens mask edges. This remains the reliable image-space fallback when surface tracking is unavailable.
 
 After running the mock segmentation example above once, use this PowerShell block to make a patterned video preview. It uses only local mock segmentation:
 
@@ -175,6 +175,46 @@ print(f"Wrote {len(result)} patterned frames at {fps:g} fps to sample_composited
 
 Open `sample_composited.mp4` to inspect the before/after effect. The generated sample output is ignored by Git.
 
+## Surface tracking (Milestone 6)
+
+Pass `track_surface=True` to `composite_video(...)` to track Shi-Tomasi feature points inside the first-frame mask with pyramidal Lucas-Kanade optical flow. RANSAC estimates a homography from frame 1 to each later frame, and the tiled pattern is warped through that transform before the usual lighting and mask blend. If too few reliable tracks remain or the homography fit fails, that frame automatically uses the version 1 image-space pattern. Low-texture objects often trigger the fallback, so the mode remains usable on clips where feature tracking cannot lock on.
+
+This example makes a small moving textured patch so optical flow has visual features to follow. With the virtual environment active, run:
+
+```powershell
+@'
+import numpy as np
+from swatchaura.compositing import composite_video
+from swatchaura.patterns import generate_houndstooth_tile
+from swatchaura.video_io import write_video
+
+rng = np.random.default_rng(9)
+patch = rng.integers(35, 220, size=(48, 56, 3), dtype=np.uint8)
+frames = []
+masks = []
+for index in range(16):
+    frame = np.full((140, 180, 3), 35, dtype=np.uint8)
+    x, y = 55 + index * 2, 42 + index
+    frame[y:y + 48, x:x + 56] = patch
+    mask = np.zeros(frame.shape[:2], dtype=np.uint8)
+    mask[y:y + 48, x:x + 56] = 255
+    frames.append(frame)
+    masks.append(mask)
+
+pattern = generate_houndstooth_tile("#F3E3C9", "#8B3A2B")
+result = composite_video(
+    frames,
+    masks,
+    pattern,
+    track_surface=True,
+    feather_radius_px=1.5,
+)
+write_video(result, "sample_tracked.mp4", 12)
+print("Wrote sample_tracked.mp4; the print should move with the textured patch.")
+'@ | python -
+Start-Process .\sample_tracked.mp4
+```
+
 ## Uploaded swatch tiling (Milestone 3)
 
 `swatchaura.patterns.tile_swatch(source, output_size, scale=..., rotation=...)` repeats an image to fill `(width, height)`. It accepts an OpenCV image array, an image path, or encoded upload bytes (for example, a Streamlit upload's `getvalue()`). `scale` sets the size of each repeat and `rotation` turns each repeat. A non-tileable source can have visible joins; uploaded tileable swatches repeat cleanly.
@@ -211,7 +251,7 @@ Start-Process .\houndstooth_preview.png
 3. Crisp, tileable houndstooth and arbitrary swatch tiling
 4. Per-frame segmentation, starting with a local mock, plus disk caching
 5. Reliable version 1 compositing with luminance, shadows, and feathered edges
-6. Optical-flow tracking and homography-based pattern placement, with automatic fallback
+6. Optical-flow tracking and homography-based pattern placement, with automatic fallback (implemented)
 7. Validated Muse Spark style settings
 8. Muse Image swatch generation
 9. Streamlit upload, preview, before/after, and download interface
