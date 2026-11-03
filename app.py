@@ -298,26 +298,35 @@ def main() -> None:
     object_prompt = st.text_input(
         "What should be patterned?",
         placeholder="the airplane wing, her jacket, the blue suitcase",
-        help="In automatic SAM mode this description locates and tracks the object. "
-        "Mock tracing modes use a box or outline instead.",
+        help="When automatic SAM is on, this description finds and tracks the object without drawing.",
     )
+    use_automatic_sam = st.toggle(
+        "Use automatic SAM mask (no drawing)",
+        value=not mock_mode,
+        help="Uses your object description to segment the clip and makes a Meta API call, even in mock mode.",
+        key="use-automatic-sam-mask",
+    )
+    if use_automatic_sam:
+        mask_method = "Automatic (SAM text prompt)"
+        st.caption("SAM 3.1 will use the description above. No box or outline is needed.")
+        if mock_mode:
+            st.warning(
+                "Automatic SAM sends this clip and its object description to Meta. "
+                "Other features remain in mock mode."
+            )
+    else:
+        local_mask_method = st.radio(
+            "Local mask helper",
+            ("GrabCut from box", "Draw precise outline"),
+            horizontal=True,
+            index=0,
+            help="These offline options need a first-frame box or outline; they do not understand the object description.",
+        )
+        mask_method = local_mask_method
+        st.caption("Turn on automatic SAM above to use the object description instead of drawing.")
 
     with st.sidebar:
         st.header("Processing")
-        mask_methods = (
-            "Automatic (SAM text prompt)",
-            "GrabCut from box",
-            "Draw precise outline",
-        )
-        mask_method = st.selectbox(
-            "Mask method",
-            mask_methods,
-            index=1 if mock_mode else 0,
-            help=(
-                "Automatic SAM uses your object description and makes a Meta API call. "
-                "GrabCut and drawing run locally but need a first-frame selection."
-            ),
-        )
         resolution_scale = st.select_slider(
             "Processing resolution",
             options=(0.25, 0.5, 0.75, 1.0),
@@ -360,16 +369,6 @@ def main() -> None:
             st.caption(box_caption)
         else:
             st.caption("Click and drag a rectangle around the object to continue.")
-    elif mask_method == "Automatic (SAM text prompt)":
-        st.subheader("Describe the object")
-        if mock_mode:
-            st.warning(
-                "This selection sends the clip and object description to Meta SAM 3.1 "
-                "for segmentation, even though mock mode remains on for style and swatch generation."
-            )
-        else:
-            st.caption("SAM 3.1 will locate and track it through the uploaded clip.")
-
     with st.form("render-form"):
         style_text = st.text_input(
             "Describe the style",
@@ -387,11 +386,11 @@ def main() -> None:
         render_clicked = st.form_submit_button("Generate preview", type="primary")
 
     if render_clicked:
-        if not object_prompt.strip() and mask_method != "Draw precise outline":
+        if use_automatic_sam and not object_prompt.strip():
             st.error("Describe which object should receive the pattern.")
         elif mask_method == "Draw precise outline" and manual_outline is None:
             st.error("Trace and close an outline around the object before rendering.")
-        elif mock_mode and mask_method == "GrabCut from box" and mock_box is None:
+        elif mask_method == "GrabCut from box" and mock_box is None:
             st.error("Draw a box around the object on frame 1 before rendering.")
         else:
             try:
@@ -420,10 +419,10 @@ def main() -> None:
                 else:
                     masks = get_video_masks(
                         processing_frames,
-                        object_prompt,
+                        object_prompt.strip() or "object inside user box",
                         # Choosing SAM explicitly opts this segmentation step
                         # into live API use, even while other features stay mocked.
-                        mock_mode=(mask_method != "Automatic (SAM text prompt)"),
+                        mock_mode=not use_automatic_sam,
                         first_frame_box=mock_box,
                         video_fps=fps,
                     )
