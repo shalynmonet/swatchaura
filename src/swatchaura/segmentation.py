@@ -226,6 +226,8 @@ def get_video_masks(
     *,
     mock_mode: bool | None = None,
     first_frame_box: Box | None = None,
+    video_path: str | Path | None = None,
+    video_fps: float = 24.0,
     cache_dir: str | Path = DEFAULT_MASK_CACHE,
     use_cache: bool = True,
 ) -> list[np.ndarray]:
@@ -250,7 +252,12 @@ def get_video_masks(
         assert first_frame_box is not None
         masks = segment_video_mock(frames, first_frame_box)
     else:
-        masks = segment_video_with_sam31(frames, object_prompt)
+        masks = segment_video_with_sam31(
+            frames,
+            object_prompt,
+            video_path=video_path,
+            fps=video_fps,
+        )
 
     if len(masks) != len(frames):
         raise ValueError(

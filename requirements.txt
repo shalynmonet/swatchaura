@@ -5,3 +5,7 @@ numpy>=2.0,<3.0
 
 # Load local configuration from .env
 python-dotenv>=1.0,<2.0
+
+# Official SDK and parser for Meta Model API SAM 3.1 segmentation
+openai>=1.70,<3.0
+meta-sam-parser>=0.0.6,<1.0

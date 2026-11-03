@@ -6,7 +6,7 @@ The first demo targets are an airplane wing filmed from a window seat and a pers
 
 ## Project status
 
-This repository is being built milestone by milestone for the Meta Global AI Developer Hackathon (deadline: November 4, 2026). Milestones 1 and 2 (project scaffold and video read/write) are complete. Milestone 3 wraps Monogrammar's houndstooth geometry, adds uploaded swatch tiling, and is ready for review. Milestone 4 adds mock segmentation and mask caching; live SAM 3.1 wiring is waiting for the official API docs.
+This repository is being built milestone by milestone for the Meta Global AI Developer Hackathon (deadline: November 4, 2026). Milestones 1 and 2 (project scaffold and video read/write) are complete. Milestone 3 wraps Monogrammar's houndstooth geometry and adds uploaded swatch tiling. Milestone 4 adds GrabCut/optical-flow mock segmentation, mask caching, and the documented live SAM 3.1 path.
 
 ## Requirements
 
@@ -107,7 +107,29 @@ print(f"Cached mask files: {len(list(__import__('pathlib').Path('cache/masks').g
 '@ | python -
 ```
 
-When the official Meta Model API docs are available, the SAM 3.1 call will be implemented only in `swatchaura.meta_client`. Until then, setting `MOCK_MODE=false` produces a clear `NotImplementedError` instead of guessing a URL or request format. The first-frame box can be supplied from a UI drawing control when the Streamlit milestone is reached.
+The live SAM 3.1 call is isolated in `swatchaura.meta_client` and follows Meta's documented `/v1/files` upload and streaming `/v1/responses` flow, parsed with `meta-sam-parser`. It reads the project's `META_API_KEY` from `.env`. In live mode, the source clip is uploaded to Meta Model API with `purpose="user_data"`. The first-frame box can be supplied from a UI drawing control when the Streamlit milestone is reached.
+
+To exercise the live path with an existing clip, switch the local `.env` setting to `MOCK_MODE=false`, then run this in PowerShell. This sends the clip to Meta Model API and uses your API access:
+
+```powershell
+@'
+from pathlib import Path
+from swatchaura.segmentation import get_video_masks
+from swatchaura.video_io import read_video
+
+video_path = Path("sample_segmentation.mp4")
+frames, fps = read_video(video_path)
+masks = get_video_masks(
+    frames,
+    "the blue rectangle",
+    video_path=video_path,
+    video_fps=fps,
+)
+print(f"SAM returned {len(masks)} frame masks; frame 1 has {int((masks[0] > 0).sum())} foreground pixels.")
+'@ | python -
+```
+
+For offline development, keep `MOCK_MODE=true` (or pass `mock_mode=True`) and provide `first_frame_box` as shown in the mock example above.
 
 ## Uploaded swatch tiling (Milestone 3)
 
@@ -153,4 +175,4 @@ Start-Process .\houndstooth_preview.png
 
 ## Meta model integration
 
-Live calls will be isolated in `meta_client.py` and will read `META_API_KEY` from `.env`. SAM 3.1 will provide text-prompted object masks, Muse Spark will turn style descriptions into validated pattern settings, and Muse Image will generate swatches. Model endpoint names and request formats will be added from the official API documentation; they are intentionally not guessed in this scaffold. Local mock implementations will make development possible without API credits.
+Live calls are isolated in `meta_client.py` and read `META_API_KEY` from `.env`. SAM 3.1 provides text-prompted object masks, Muse Spark will turn style descriptions into validated pattern settings, and Muse Image will generate swatches. The SAM request follows Meta's [media segmentation guide](https://dev.meta.ai/docs/media-segmentation), [prompt and video upload guide](https://dev.meta.ai/docs/sam/segmenting), and [Python parser guide](https://dev.meta.ai/docs/sam/client-libraries). Muse Spark and Muse Image request formats will be added in their later milestones. Local mock implementations support development without API calls.
